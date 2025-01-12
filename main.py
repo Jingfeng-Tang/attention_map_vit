@@ -386,10 +386,16 @@ if __name__ == '__main__':
     args = parser.parse_args()
     start_time = datetime.datetime.now()
     formatted_date_time = start_time.strftime("%Y-%m-%d-%H-%M-%S")
+
+    if args.gen_bounding_boxes:
+        formatted_date_time = formatted_date_time + '_gen_bounding_box'
+
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
         args.output_dir = os.path.join(args.output_dir, formatted_date_time)
         os.makedirs(args.output_dir)
+
+
 
     output_dir = Path(args.output_dir)
     with (output_dir / "log.txt").open("a") as f:
