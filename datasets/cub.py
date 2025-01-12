@@ -103,6 +103,7 @@ class CUBDataset(Dataset):
             image = self.train_transform(image)
             return image, label
         else:
+            ori_img = torch.from_numpy(np.array(image))
             image = self.test_transform(image)
 
             bbox = self.bbox_list[self.index_list[idx]]
@@ -126,7 +127,7 @@ class CUBDataset(Dataset):
             # gt_bbox = torch.tensor(gt_bbox)
             gt_bbox = np.array([left_bottom_x, left_bottom_y, right_top_x, right_top_y]).reshape(-1)
             gt_bbox = " ".join(list(map(str, gt_bbox)))
-            return image, label, gt_bbox, name
+            return ori_img, image, label, gt_bbox, name
 
     def __len__(self):
         return len(self.index_list)

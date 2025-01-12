@@ -82,7 +82,7 @@ def evaluate(data_loader, model, device):
     # switch to evaluation mode
     model.eval()
 
-    for images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
+    for ori_img, images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
         # print(f'images.shape: {images.shape}')  # [128, 3, 224, 224]
@@ -222,17 +222,20 @@ def generate_bounding_boxes(data_loader, model, device, args):
     model.eval()
 
     loc_gt_known = []
+    loc_top1 = []
     cls_top1 = []
     cls_top5 = []
 
-    for images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
+    for ori_img, images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
         # gt_bbox = gt_bbox.to(device, non_blocking=True)
-        gt_bbox = gt_bbox[0].strip().split(' ')
-        gt_bbox = list(map(float, gt_bbox))
+
         # print(gt_bbox)
-        batch_size = images.shape[0]
+        b, h, w, d = ori_img.shape
+        # print(f'ori_img: {name}')
+        # a = []
+        # b = a[1]
 
         with torch.cuda.amp.autocast():
             x_cls_logits, att_map = model(images, return_att=True, n_layers=12)
@@ -240,45 +243,74 @@ def generate_bounding_boxes(data_loader, model, device, args):
             prec1, prec5 = utils.accuracy(x_cls_logits.data, target, topk=(1, 5))
             cls_top1.append(prec1.cpu().numpy())
             cls_top5.append(prec5.cpu().numpy())
+            # cls correct
+            value, indice = x_cls_logits.data.topk(1, 1, True, True)
+            indices = indice.t()
+            correct = indices.eq(target.view(1, -1).expand_as(indices))
 
             # print(f'x_cls_logits: {x_cls_logits.shape}')    # [1, 200]
             # print(f'att_map: {att_map.shape}')  # [1, 14, 14]
             att_map = att_map.unsqueeze(0)
             # resize
-            cls_attentions = F.interpolate(att_map, size=(224, 224), mode='bilinear', align_corners=False)[0,0,:,:]
+            cls_attention = F.interpolate(att_map, size=(h, w), mode='bilinear', align_corners=False)[0,0,:,:]
             # print(f'cls_attentions: {cls_attentions.shape}')  # [224,224]
             # normalize
-            cls_attentions = F.relu(cls_attentions)
-            cls_attentions_min, cls_attentions_max = cls_attentions.min(), cls_attentions.max()
-            cls_attentions = (cls_attentions - cls_attentions_min) / (cls_attentions_max - cls_attentions_min)
-            # Estimate BBOX
-            cls_attentions = cls_attentions.cpu().numpy()
-            estimated_bbox = get_bboxes(cls_attentions, args.att_thr)
-            # print(f'args.att_thr: {args.att_thr}')
-            # Calculate IoU
+            # cls_attentions = F.relu(cls_attentions)
+            cls_attention = (cls_attention - cls_attention.min()) / (cls_attention.max() - cls_attention.min() + 1e-8)
 
-            # gt_box = gt_bbox[1 * 4:(1 + 1) * 4]
-            # print(f'gt_bbox: {gt_bbox}')  # 1
-            # print(f'gt_box: {gt_box}')  # 1
-            # iou_i = cal_iou(estimated_bbox, gt_box)
-            iou_i = cal_iou(estimated_bbox, gt_bbox)
+            # a = []
+            # b = a[1]
 
-            # gt known
-            if iou_i >= 0.5:
-                loc_gt_known.append(1)
+            # loc_top1
+            if correct:
+                # Estimate BBOX
+                gt_bbox = gt_bbox[0].strip().split(' ')
+                gt_bbox = list(map(float, gt_bbox))
+                cls_attention = cls_attention.cpu().numpy()
+                estimated_bbox = get_bboxes(cls_attention, args.att_thr)
+                iou = cal_iou(estimated_bbox, gt_bbox)
+                loc_top1.append(iou)
             else:
-                loc_gt_known.append(0)
+                loc_top1.append(0.0)
+            loc_top1_miou = np.mean(loc_top1)
 
-    gt_known = list2acc(loc_gt_known)
 
-    top1, top5 = np.mean(cls_top1), np.mean(cls_top5)
+
+
+
+            if args.gen_attention_maps:
+                name_str = name[0]
+                name_str = name_str.replace(".jpg", "")
+                name_str = name_str.replace("/", "_")
+                fname = os.path.join(args.attention_maps_dir, name_str + '_class_' + str(indice[0].item()) + '_score_' + str(value[0].item()) + '_' + str(correct[0].item()) + '.png')
+
+                ori_img = ori_img.squeeze(0).cpu().numpy()
+                cls_attention = cls_attention.cpu().numpy()
+
+                show_cam_on_image(ori_img, cls_attention, fname)
+
+
+
+
+
+            # iou_i = cal_iou(estimated_bbox, gt_bbox)
+
+            # # gt known
+            # if iou_i >= 0.5:
+            #     loc_gt_known.append(1)
+            # else:
+            #     loc_gt_known.append(0)
+
+    # gt_known = list2acc(loc_gt_known)
+
+    # top1, top5 = np.mean(cls_top1), np.mean(cls_top5)
 
     # a = []
     # b = a[1]
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    return top1, top5, gt_known
+    return loc_top1_miou
 
 
 def get_bboxes(cam, cam_thr=0.2):
@@ -317,6 +349,7 @@ def cal_iou(box1, box2, method='iou'):
     :param box2:
     :return:
     """
+
     box1 = np.asarray(box1, dtype=float)
     box2 = np.asarray(box2, dtype=float)
     if box1.ndim == 1:

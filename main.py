@@ -127,6 +127,8 @@ def get_args_parser():
 
     # generating bounding boxes
     parser.add_argument('--gen_bounding_boxes', default=False, action='store_true')
+    parser.add_argument('--gen_attention_maps', default=False, action='store_true')
+    parser.add_argument('--attention_maps_dir', type=str, default='attention_maps')
     parser.add_argument('--patch-size', type=int, default=16)
     parser.add_argument('--attention-dir', type=str, default='cam-png')
     parser.add_argument('--layer-index', type=int, default=12, help='extract attention maps from the last layers')
@@ -139,7 +141,7 @@ def get_args_parser():
     parser.add_argument("--scales", nargs='+', type=float, default=[1.0,0.75,1.25])
     parser.add_argument('--label-file-path', type=str, default=None)
     parser.add_argument('--attention-type', type=str, default='fused')
-    parser.add_argument("--att_thr", type=float, default=0.6)
+    parser.add_argument("--att_thr", type=float, default=0.8)
 
 
     parser.add_argument('--seed', default=0, type=int)
@@ -315,13 +317,17 @@ def main(args):
     #     return
 
     if args.gen_bounding_boxes:
-        print(f"-----------------------Start gen_bounding_boxes-----------------------")
+        output_dir = Path(args.output_dir)
+        with (output_dir / "log.txt").open("a") as f:
+            f.write(f"-----------------------Start gen_bounding_boxes-----------------------")
+        # print(f"-----------------------Start gen_bounding_boxes-----------------------")
         checkpoint = torch.load(args.ckpt, map_location='cpu')
-        # print(checkpoint)
         model.load_state_dict(checkpoint['model'], strict=True)
-        top1, top5, gt_known = generate_bounding_boxes(data_loader_val, model, device, args)
-        print(f"-----------------------End gen_bounding_boxes-----------------------")
-        print(f"top1: {top1}, top5: {top5}, gt_known: {gt_known}")
+        # top1, top5, gt_known = generate_bounding_boxes(data_loader_val, model, device, args)
+        loc_top1_miou = generate_bounding_boxes(data_loader_val, model, device, args)
+        with (output_dir / "log.txt").open("a") as f:
+            f.write(f"-----------------------End gen_bounding_boxes-----------------------")
+            f.write(f"loc_top1_miou: {loc_top1_miou}")
         return
 
     print(f"Start training for {args.epochs} epochs")
@@ -394,6 +400,10 @@ if __name__ == '__main__':
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
         args.output_dir = os.path.join(args.output_dir, formatted_date_time)
         os.makedirs(args.output_dir)
+
+    if args.gen_attention_maps:
+        args.attention_maps_dir = os.path.join(args.output_dir, args.attention_maps_dir)
+        os.makedirs(args.attention_maps_dir)
 
 
 
