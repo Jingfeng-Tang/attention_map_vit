@@ -128,7 +128,9 @@ def get_args_parser():
     # generating bounding boxes
     parser.add_argument('--gen_bounding_boxes', default=False, action='store_true')
     parser.add_argument('--gen_attention_maps', default=False, action='store_true')
+    parser.add_argument('--gen_maps_boxes', default=False, action='store_true')
     parser.add_argument('--attention_maps_dir', type=str, default='attention_maps')
+    parser.add_argument('--maps_boxes_dir', type=str, default='maps_boxes')
     parser.add_argument('--patch-size', type=int, default=16)
     parser.add_argument('--attention-dir', type=str, default='cam-png')
     parser.add_argument('--layer-index', type=int, default=12, help='extract attention maps from the last layers')
@@ -141,7 +143,7 @@ def get_args_parser():
     parser.add_argument("--scales", nargs='+', type=float, default=[1.0,0.75,1.25])
     parser.add_argument('--label-file-path', type=str, default=None)
     parser.add_argument('--attention-type', type=str, default='fused')
-    parser.add_argument("--att_thr", type=float, default=0.8)
+    parser.add_argument("--att_thr", type=float, default=0.6)
 
 
     parser.add_argument('--seed', default=0, type=int)
@@ -179,8 +181,9 @@ def main(args):
     torch.backends.cudnn.enabled = False
 
     # dataset
-    dataset_cub_train = CUBDataset('/data/c425/tjf/datasets/CUB_200_2011/', is_train=True)
-    dataset_cub_val = CUBDataset('/data/c425/tjf/datasets/CUB_200_2011/', is_train=False)
+    dataset_cub_train = CUBDataset('/data/c425/tjf/datasets/CUB_200_2011/', is_train=True, is_gen_bbox = False)
+    dataset_cub_val = CUBDataset('/data/c425/tjf/datasets/CUB_200_2011/', is_train=False, is_gen_bbox = False)
+    dataset_cub_gen = CUBDataset('/data/c425/tjf/datasets/CUB_200_2011/', is_train=False, is_gen_bbox = True)
 
     sampler_train = torch.utils.data.RandomSampler(dataset_cub_train)
 
@@ -194,6 +197,12 @@ def main(args):
         drop_last=True,)
     data_loader_val = torch.utils.data.DataLoader(
         dataset_cub_val,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        pin_memory=True)
+
+    data_loader_gen = torch.utils.data.DataLoader(
+        dataset_cub_gen,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
         pin_memory=True)
@@ -318,16 +327,22 @@ def main(args):
 
     if args.gen_bounding_boxes:
         output_dir = Path(args.output_dir)
+        print(f"------------------------Start gen_bounding_boxes------------------------\n")
         with (output_dir / "log.txt").open("a") as f:
-            f.write(f"-----------------------Start gen_bounding_boxes-----------------------")
-        # print(f"-----------------------Start gen_bounding_boxes-----------------------")
+            f.write(f"------------------------Start gen_bounding_boxes------------------------\n")
+
         checkpoint = torch.load(args.ckpt, map_location='cpu')
         model.load_state_dict(checkpoint['model'], strict=True)
-        # top1, top5, gt_known = generate_bounding_boxes(data_loader_val, model, device, args)
-        loc_top1_miou = generate_bounding_boxes(data_loader_val, model, device, args)
+        cls_top1, cls_top5, bbox_top1_mIoU = generate_bounding_boxes(data_loader_gen, model, device, args)
+        print(f"cls_top1: {cls_top1:.5f}\n")
+        print(f"cls_top5: {cls_top5:.5f}\n")
+        print(f"bbox_top1_mIoU: {bbox_top1_mIoU * 100:.5f}\n")
+        print(f"------------------------End gen_bounding_boxes------------------------\n")
         with (output_dir / "log.txt").open("a") as f:
-            f.write(f"-----------------------End gen_bounding_boxes-----------------------")
-            f.write(f"loc_top1_miou: {loc_top1_miou}")
+            f.write(f"cls_top1: {cls_top1:.5f}\n")
+            f.write(f"cls_top5: {cls_top5:.5f}\n")
+            f.write(f"bbox_top1_mIoU: {bbox_top1_mIoU * 100:.5f}\n")
+            f.write(f"------------------------End gen_bounding_boxes------------------------")
         return
 
     print(f"Start training for {args.epochs} epochs")
@@ -396,6 +411,9 @@ if __name__ == '__main__':
     if args.gen_bounding_boxes:
         formatted_date_time = formatted_date_time + '_gen_bounding_box'
 
+    if args.gen_maps_boxes:
+        formatted_date_time = formatted_date_time + '_gen_maps_boxes'
+
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
         args.output_dir = os.path.join(args.output_dir, formatted_date_time)
@@ -405,12 +423,16 @@ if __name__ == '__main__':
         args.attention_maps_dir = os.path.join(args.output_dir, args.attention_maps_dir)
         os.makedirs(args.attention_maps_dir)
 
+    if args.gen_maps_boxes:
+        args.maps_boxes_dir = os.path.join(args.output_dir, args.maps_boxes_dir)
+        os.makedirs(args.maps_boxes_dir)
 
 
     output_dir = Path(args.output_dir)
     with (output_dir / "log.txt").open("a") as f:
+        f.write(f"------------------------Start Parameters------------------------\n")
         for arg in vars(args):
-            # print(f"{arg}: {getattr(args, arg)}\n")
             f.write(f'{arg}: {getattr(args, arg)}\n')
+        f.write(f"------------------------End Parameters------------------------\n")
 
     main(args)

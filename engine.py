@@ -82,7 +82,7 @@ def evaluate(data_loader, model, device):
     # switch to evaluation mode
     model.eval()
 
-    for ori_img, images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
+    for images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
         # print(f'images.shape: {images.shape}')  # [128, 3, 224, 224]
@@ -221,21 +221,27 @@ def generate_bounding_boxes(data_loader, model, device, args):
 
     model.eval()
 
-    loc_gt_known = []
-    loc_top1 = []
     cls_top1 = []
     cls_top5 = []
+
+    ground_truth_boxes = []
+    estimated_bboxes = []
 
     for ori_img, images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
-        # gt_bbox = gt_bbox.to(device, non_blocking=True)
 
-        # print(gt_bbox)
+
+        # if name[0].find("0008_796083") != -1:
+        #     print('--------')
+        #     print(name)
+        #     print(gt_bbox)
+        #     print(ori_img.shape)
+            # a = []
+            # b = a[1]
         b, h, w, d = ori_img.shape
         # print(f'ori_img: {name}')
-        # a = []
-        # b = a[1]
+
 
         with torch.cuda.amp.autocast():
             x_cls_logits, att_map = model(images, return_att=True, n_layers=12)
@@ -258,23 +264,26 @@ def generate_bounding_boxes(data_loader, model, device, args):
             # cls_attentions = F.relu(cls_attentions)
             cls_attention = (cls_attention - cls_attention.min()) / (cls_attention.max() - cls_attention.min() + 1e-8)
 
+
+            # GT BBOX
+            gt_bbox = gt_bbox[0].strip().split(' ')
+            gt_bbox = list(map(float, gt_bbox))
+            # print(gt_bbox)
+            iou_gt_bbox = [gt_bbox[0], gt_bbox[1], gt_bbox[0]+gt_bbox[2], gt_bbox[1]+gt_bbox[3]]
+            ground_truth_boxes.append(iou_gt_bbox)
+            # print(iou_gt_bbox)
             # a = []
             # b = a[1]
+            # Estimate BBOX
+            cls_attention = cls_attention.cpu().numpy()
+            estimated_bbox = get_bboxes(cls_attention, args.att_thr)
+
 
             # loc_top1
             if correct:
-                # Estimate BBOX
-                gt_bbox = gt_bbox[0].strip().split(' ')
-                gt_bbox = list(map(float, gt_bbox))
-                cls_attention = cls_attention.cpu().numpy()
-                estimated_bbox = get_bboxes(cls_attention, args.att_thr)
-                iou = cal_iou(estimated_bbox, gt_bbox)
-                loc_top1.append(iou)
+                estimated_bboxes.append(estimated_bbox)
             else:
-                loc_top1.append(0.0)
-            loc_top1_miou = np.mean(loc_top1)
-
-
+                estimated_bboxes.append([0.0, 0.0, 0.0, 0.0])
 
 
 
@@ -290,10 +299,35 @@ def generate_bounding_boxes(data_loader, model, device, args):
                 show_cam_on_image(ori_img, cls_attention, fname)
 
 
+            if args.gen_maps_boxes:
+                name_str = name[0]
+                name_str = name_str.replace(".jpg", "")
+                name_str = name_str.replace("/", "_")
+                fname = os.path.join(args.attention_maps_dir, name_str + '_class_' + str(indice[0].item()) + '_score_' + str(value[0].item()) + '_' + str(correct[0].item()) + '.png')
 
+                ori_img = ori_img.squeeze(0).cpu().numpy()
 
+                cam = show_cam_on_image(ori_img, cls_attention, save_path=None)
 
-            # iou_i = cal_iou(estimated_bbox, gt_bbox)
+                boxed_image = draw_bbox(cam, estimated_bbox, gt_bbox)
+
+                name_str = name[0]
+                name_str = name_str.replace(".jpg", "")
+                name_str = name_str.replace("/", "_")
+                fname = os.path.join(args.maps_boxes_dir,
+                                     name_str + '_class_' + str(indice[0].item()) + '_score_' + str(
+                                         value[0].item()) + '_' + str(correct[0].item()) + '.png')
+                
+                cv2.imwrite(fname, boxed_image)
+
+                # if name[0].find("0008_796083") != -1:
+                #     print(gt_bbox)
+                #     a = []
+                #     b = a[1]
+
+                # a = []
+                # b = a[1]
+
 
             # # gt known
             # if iou_i >= 0.5:
@@ -303,14 +337,15 @@ def generate_bounding_boxes(data_loader, model, device, args):
 
     # gt_known = list2acc(loc_gt_known)
 
-    # top1, top5 = np.mean(cls_top1), np.mean(cls_top5)
+    top1, top5 = np.mean(cls_top1), np.mean(cls_top5)
 
     # a = []
     # b = a[1]
+    top1_mIoU = compute_mIoU(ground_truth_boxes, estimated_bboxes)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    return loc_top1_miou
+    return top1, top5, top1_mIoU
 
 
 def get_bboxes(cam, cam_thr=0.2):
@@ -339,38 +374,46 @@ def get_bboxes(cam, cam_thr=0.2):
 
     return estimated_bbox
 
-
-def cal_iou(box1, box2, method='iou'):
+def compute_iou(box1, box2):
     """
-    support:
-    1. box1 and box2 are the same shape: [N, 4]
-    2.
-    :param box1:
-    :param box2:
-    :return:
+    计算两个bounding box的IoU
+    :param box1: [x1, y1, x2, y2]
+    :param box2: [x1, y1, x2, y2]
+    :return: IoU
     """
+    x1_inter = max(box1[0], box2[0])
+    y1_inter = max(box1[1], box2[1])
+    x2_inter = min(box1[2], box2[2])
+    y2_inter = min(box1[3], box2[3])
 
-    box1 = np.asarray(box1, dtype=float)
-    box2 = np.asarray(box2, dtype=float)
-    if box1.ndim == 1:
-        box1 = box1[np.newaxis, :]
-    if box2.ndim == 1:
-        box2 = box2[np.newaxis, :]
+    inter_area = max(0, x2_inter - x1_inter) * max(0, y2_inter - y1_inter)
 
-    iw = np.minimum(box1[:, 2], box2[:, 2]) - np.maximum(box1[:, 0], box2[:, 0]) + 1
-    ih = np.minimum(box1[:, 3], box2[:, 3]) - np.maximum(box1[:, 1], box2[:, 1]) + 1
+    box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+    box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
 
-    i_area = np.maximum(iw, 0.0) * np.maximum(ih, 0.0)
-    box1_area = (box1[:, 2] - box1[:, 0] + 1) * (box1[:, 3] - box1[:, 1] + 1)
-    box2_area = (box2[:, 2] - box2[:, 0] + 1) * (box2[:, 3] - box2[:, 1] + 1)
+    union_area = box1_area + box2_area - inter_area
 
-    if method == 'iog':
-        iou_val = i_area / (box2_area)
-    elif method == 'iob':
-        iou_val = i_area / (box1_area)
-    else:
-        iou_val = i_area / (box1_area + box2_area - i_area)
-    return iou_val
+    iou = inter_area / union_area
+
+    return iou
+
+
+def compute_mIoU(ground_truth_boxes, predicted_boxes):
+    """
+    计算多个bounding box的mIoU
+    :param ground_truth_boxes: [[x1, y1, x2, y2], ...]
+    :param predicted_boxes: [[x1, y1, x2, y2], ...]
+    :return: mIoU
+    """
+    ious = []
+    for gt_box, pred_box in zip(ground_truth_boxes, predicted_boxes):
+        iou = compute_iou(gt_box, pred_box)
+        ious.append(iou)
+
+    mIoU = np.mean(ious)
+
+    return mIoU
+
 
 
 def list2acc(results_list):
@@ -390,4 +433,13 @@ def show_cam_on_image(img, mask, save_path):
     cam = heatmap + img
     cam = cam / np.max(cam)
     cam = np.uint8(255 * cam)
-    cv2.imwrite(save_path, cam)
+    if save_path is not None:
+        cv2.imwrite(save_path, cam)
+        return
+    else:
+        return cam
+
+def draw_bbox(img, box1, box2, color1=(0, 0, 255), color2=(0, 255, 0)):
+    cv2.rectangle(img, (int(box1[0]), int(box1[1])), (int(box1[2]), int(box1[3])), color1, 2)
+    cv2.rectangle(img, (int(box2[0]), int(box2[1])), (int(box2[0]+box2[2]), int(box2[1]+box2[3])), color2, 2)
+    return img

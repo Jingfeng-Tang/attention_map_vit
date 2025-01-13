@@ -43,10 +43,11 @@ class CUBDataset(Dataset):
         root (string): Root directory of dataset where directory "CUB_200_2011" exists.
         is_train (bool): If True. create dataset from training set, otherwise creates from test set.
     """
-    def __init__(self, root, is_train):
+    def __init__(self, root, is_train, is_gen_bbox):
 
         self.root = root
         self.is_train = is_train
+        self.is_gen_bbox = is_gen_bbox
         self.resize_size = 256
         self.crop_size = 224
 
@@ -107,7 +108,15 @@ class CUBDataset(Dataset):
             image = self.test_transform(image)
 
             bbox = self.bbox_list[self.index_list[idx]]
+            # print(f'bbox: {type(bbox)}')
+            # print(f'bbox: {bbox}')
+
             bbox = [int(float(value)) for value in bbox]
+            ori_bbox = bbox
+            # print(f'ori_bbox: {type(ori_bbox)}')
+            # print(f'ori_bbox: {ori_bbox}')
+            # a = []
+            # b = a[1]
             [x, y, bbox_width, bbox_height] = bbox
             # if self.is_train:
             #     resize_size = self.resize_size
@@ -127,7 +136,13 @@ class CUBDataset(Dataset):
             # gt_bbox = torch.tensor(gt_bbox)
             gt_bbox = np.array([left_bottom_x, left_bottom_y, right_top_x, right_top_y]).reshape(-1)
             gt_bbox = " ".join(list(map(str, gt_bbox)))
+            # print(f'gt_bbox: {gt_bbox}')
+        if self.is_gen_bbox:
+            gt_bbox = " ".join(list(map(str, ori_bbox)))
             return ori_img, image, label, gt_bbox, name
+            # print(f'ori_bbox: {gt_bbox}')
+        return image, label, gt_bbox, name
+
 
     def __len__(self):
         return len(self.index_list)
