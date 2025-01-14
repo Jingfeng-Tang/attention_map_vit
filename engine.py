@@ -244,7 +244,7 @@ def generate_bounding_boxes(data_loader, model, device, args):
 
 
         with torch.cuda.amp.autocast():
-            x_cls_logits, att_map = model(images, return_att=True, n_layers=12)
+            x_cls_logits, att_map, att_p_w = model(images, return_att=True, n_layers=12)
 
             prec1, prec5 = utils.accuracy(x_cls_logits.data, target, topk=(1, 5))
             cls_top1.append(prec1.cpu().numpy())
@@ -256,7 +256,18 @@ def generate_bounding_boxes(data_loader, model, device, args):
 
             # print(f'x_cls_logits: {x_cls_logits.shape}')    # [1, 200]
             # print(f'att_map: {att_map.shape}')  # [1, 14, 14]
+            # print(f'att_p_w: {att_p_w.shape}')  # [1, 196, 196]
+            # att_map = att_map.unsqueeze(0)
+            # a = []
+            # b = a[1]
+
+            if args.refine_patch_att_mat:
+                att_map = torch.matmul(att_map.view(1, -1), att_p_w.squeeze(0)).reshape(1,
+                                                                              att_map.shape[1], att_map.shape[2])
+
+
             att_map = att_map.unsqueeze(0)
+
             # resize
             cls_attention = F.interpolate(att_map, size=(h, w), mode='bilinear', align_corners=False)[0,0,:,:]
             # print(f'cls_attentions: {cls_attentions.shape}')  # [224,224]

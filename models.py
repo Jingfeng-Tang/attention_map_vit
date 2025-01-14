@@ -98,7 +98,9 @@ class Attmap(VisionTransformer):
                 attn_weights = torch.mean(attn_weights, dim=2)  # 12 * B * N * N
                 n, c, h, w = x_patch.shape
                 att_w = attn_weights[-n_layers:].sum(0)[:, 0:1, 1:].reshape([n, h, w])
-                # print(f'att_w: {att_w.shape}')  # [128, 14, 14]
+                # print(f'attn_weights: {attn_weights.shape}')  # [128, 14, 14]
+                att_p_w = attn_weights[-n_layers:].sum(0)[:, 1:, 1:]
+                # print(f'att_p_w: {att_p_w.shape}')  # [1, 196, 196]
                 att_map = att_w  # B * C * 14 * 14
             else:
                 patch_attn = attn_weights[:, :, 1:, 1:]
@@ -107,7 +109,7 @@ class Attmap(VisionTransformer):
         x_cls_logits = self.head(x_cls)
 
         if return_att:
-            return x_cls_logits, att_map
+            return x_cls_logits, att_map, att_p_w
         else:
             return x_cls_logits
 

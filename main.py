@@ -129,6 +129,7 @@ def get_args_parser():
     parser.add_argument('--gen_bounding_boxes', default=False, action='store_true')
     parser.add_argument('--gen_attention_maps', default=False, action='store_true')
     parser.add_argument('--gen_maps_boxes', default=False, action='store_true')
+    parser.add_argument('--refine_patch_att_mat', default=False, action='store_true')
     parser.add_argument('--attention_maps_dir', type=str, default='attention_maps')
     parser.add_argument('--maps_boxes_dir', type=str, default='maps_boxes')
     parser.add_argument('--patch-size', type=int, default=16)
@@ -409,10 +410,13 @@ if __name__ == '__main__':
     formatted_date_time = start_time.strftime("%Y-%m-%d-%H-%M-%S")
 
     if args.gen_bounding_boxes:
-        formatted_date_time = formatted_date_time + '_gen_bounding_box'
+        formatted_date_time = formatted_date_time + '_gen_bbox'
 
     if args.gen_maps_boxes:
         formatted_date_time = formatted_date_time + '_gen_maps_boxes'
+
+    if args.refine_patch_att_mat:
+        formatted_date_time = formatted_date_time + '_refine'
 
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
