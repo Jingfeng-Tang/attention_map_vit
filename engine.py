@@ -227,6 +227,10 @@ def generate_bounding_boxes(data_loader, model, device, args):
     ground_truth_boxes = []
     estimated_bboxes = []
 
+    correct_ground_truth_boxes = []
+    correct_estimated_bboxes = []
+
+
     for ori_img, images, target, gt_bbox, name in metric_logger.log_every(data_loader, 10, header):
         images = images.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
@@ -293,6 +297,9 @@ def generate_bounding_boxes(data_loader, model, device, args):
             # loc_top1
             if correct:
                 estimated_bboxes.append(estimated_bbox)
+                # another metric: only correct sample's mIoU
+                correct_estimated_bboxes.append(estimated_bbox)
+                correct_ground_truth_boxes.append(iou_gt_bbox)
             else:
                 estimated_bboxes.append([0.0, 0.0, 0.0, 0.0])
 
@@ -348,15 +355,16 @@ def generate_bounding_boxes(data_loader, model, device, args):
 
     # gt_known = list2acc(loc_gt_known)
 
-    top1, top5 = np.mean(cls_top1), np.mean(cls_top5)
+    cls_top1, cls_top5 = np.mean(cls_top1), np.mean(cls_top5)
 
     # a = []
     # b = a[1]
-    top1_mIoU = compute_mIoU(ground_truth_boxes, estimated_bboxes)
+    mIoU_top1 = compute_mIoU(ground_truth_boxes, estimated_bboxes)
+    correct_samples_mIoU_top1 = compute_mIoU(correct_ground_truth_boxes, correct_estimated_bboxes)
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-    return top1, top5, top1_mIoU
+    return cls_top1, cls_top5, mIoU_top1, correct_samples_mIoU_top1
 
 
 def get_bboxes(cam, cam_thr=0.2):

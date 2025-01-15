@@ -6,7 +6,7 @@ import datetime
 
 import torch
 import torch.distributed as dist
-
+from texttable import Texttable
 
 class SmoothedValue(object):
     """Track a series of values and provide access to smoothed values over a
@@ -288,3 +288,28 @@ def evaluate_cls(cls_label, logits):
 
 
     return cls_top1, cls_top5
+
+
+def metric_format(data):
+    """
+    打印一个格式化的表格。
+
+    参数:
+    data (dict): 一个字典，键是指标名，值是对应的指标值。
+    """
+    # 创建 Texttable 对象
+    table = Texttable()
+
+    # 添加表头
+    table.header(["Metric", "Value"])
+
+    # 添加数据行
+    for key, value in data.items():
+        table.add_row([key, f"{value:.3f}"])
+
+    # 设置表格样式
+    table.set_cols_align(["l", "l"])  # 指标名左对齐，值右对齐
+    table.set_cols_valign(["m", "m"])  # 指标名和值都垂直居中对齐
+
+    # 返回表格
+    return table

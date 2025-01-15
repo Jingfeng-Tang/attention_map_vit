@@ -20,6 +20,7 @@ import numpy as np
 import random
 import timm
 import models
+from utils import metric_format
 
 def get_args_parser():
     parser = argparse.ArgumentParser('ViT training and evaluation script', add_help=False)
@@ -334,16 +335,34 @@ def main(args):
 
         checkpoint = torch.load(args.ckpt, map_location='cpu')
         model.load_state_dict(checkpoint['model'], strict=True)
-        cls_top1, cls_top5, bbox_top1_mIoU = generate_bounding_boxes(data_loader_gen, model, device, args)
-        print(f"cls_top1: {cls_top1:.5f}\n")
-        print(f"cls_top5: {cls_top5:.5f}\n")
-        print(f"bbox_top1_mIoU: {bbox_top1_mIoU * 100:.5f}\n")
-        print(f"------------------------End gen_bounding_boxes------------------------\n")
+        cls_top1, cls_top5, mIoU_top1, correct_samples_mIoU_top1 = generate_bounding_boxes(data_loader_gen, model, device, args)
+        res = {
+            "cls_top1": cls_top1,
+            "cls_top5": cls_top5,
+            "mIoU_top1": mIoU_top1 * 100,
+            "correct_samples_mIoU_top1": correct_samples_mIoU_top1 * 100,
+        }
+        table = metric_format(res)
+        print(table.draw())
+        print(f"\n------------------------End gen_bounding_boxes------------------------\n")
         with (output_dir / "log.txt").open("a") as f:
-            f.write(f"cls_top1: {cls_top1:.5f}\n")
-            f.write(f"cls_top5: {cls_top5:.5f}\n")
-            f.write(f"bbox_top1_mIoU: {bbox_top1_mIoU * 100:.5f}\n")
-            f.write(f"------------------------End gen_bounding_boxes------------------------")
+            f.write(table.draw())
+            f.write(f"\n------------------------End gen_bounding_boxes------------------------")
+
+        with (Path('./auto_run_res.txt')).open("a") as f:
+            f.write(f"\n++++++++++++++++++++++++Start auto_run_results++++++++++++++++++++++++\n")
+            f.write(f'args.att.thr: {args.att_thr}\n')
+            f.write('\n')
+            f.write(table.draw())
+            f.write(f"\n------------------------End auto_run_results------------------------\n")
+        # with open("auto_run_metric_log.txt", "w") as f:
+        #     f.write(f"------------------------Start gen_bounding_boxes------------------------\n")
+        #     f.write(f"att_thr: {args.att_thr:.3f}\n")
+        #     f.write(f"cls_top1: {cls_top1:.3f}\n")
+        #     f.write(f"cls_top5: {cls_top5:.3f}\n")
+        #     f.write(f"mIoU_top1: {mIoU_top1 * 100:.3f}\n")
+        #     f.write(f"correct_samples_mIoU_top1: {correct_samples_mIoU_top1 * 100:.3f}\n")
+        #     f.write(f"------------------------End gen_bounding_boxes------------------------")
         return
 
     print(f"Start training for {args.epochs} epochs")
